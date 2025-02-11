@@ -36,6 +36,7 @@ from accelerate.hooks import remove_hook_from_submodules
 from accelerate.test_utils import (
     require_bnb,
     require_cuda,
+    require_cuda_or_xpu,
     require_multi_device,
     require_multi_gpu,
     require_non_cpu,
@@ -389,7 +390,7 @@ class BigModelingTester(unittest.TestCase):
         # We should need only 5000 * 5000 * 32 // 8 * 1e-6 = 100 MB on the device 0 for the four linear weights.
         device_map = {"linear0": 0, "linear1": 1, "linear2": 0, "linear3": 0, "linear4": 0}
 
-        # Just to intialize CUDA context.
+        # Just to initialize CUDA context.
         a = torch.rand(5).to("cuda:0")  # noqa: F841
 
         free_memory_bytes = torch.cuda.mem_get_info("cuda:0")[0]
@@ -462,7 +463,7 @@ class BigModelingTester(unittest.TestCase):
         with torch.no_grad():
             expected = model(x)
 
-        # Just to intialize CUDA context.
+        # Just to initialize CUDA context.
         a = torch.rand(5).to("cuda:0")  # noqa: F841
 
         free_memory_bytes = torch.cuda.mem_get_info("cuda:0")[0]
@@ -559,7 +560,7 @@ class BigModelingTester(unittest.TestCase):
         with torch.no_grad():
             expected = model(x)
 
-        # Just to intialize CUDA context.
+        # Just to initialize CUDA context.
         a = torch.rand(5).to("cuda:0")  # noqa: F841
 
         free_memory_bytes = torch.cuda.mem_get_info("cuda:0")[0]
@@ -877,7 +878,7 @@ class BigModelingTester(unittest.TestCase):
     @require_non_torch_xla
     @slow
     @require_bnb
-    @require_multi_gpu
+    @require_multi_device
     def test_dispatch_model_bnb(self):
         """Tests that `dispatch_model` quantizes int8 layers"""
         from huggingface_hub import hf_hub_download
@@ -906,7 +907,7 @@ class BigModelingTester(unittest.TestCase):
         assert model.h[(-1)].self_attention.query_key_value.weight.dtype == torch.int8
         assert model.h[(-1)].self_attention.query_key_value.weight.device.index == 1
 
-    @require_cuda
+    @require_cuda_or_xpu
     @slow
     @require_bnb
     def test_dispatch_model_int8_simple(self):
@@ -946,7 +947,7 @@ class BigModelingTester(unittest.TestCase):
         model = load_checkpoint_and_dispatch(
             model,
             checkpoint=model_path,
-            device_map={"": torch.device("cuda:0")},
+            device_map={"": torch_device},
         )
 
         assert model.h[0].self_attention.query_key_value.weight.dtype == torch.int8
@@ -963,13 +964,13 @@ class BigModelingTester(unittest.TestCase):
         model = load_checkpoint_and_dispatch(
             model,
             checkpoint=model_path,
-            device_map={"": "cuda:0"},
+            device_map={"": torch_device},
         )
 
         assert model.h[0].self_attention.query_key_value.weight.dtype == torch.int8
         assert model.h[0].self_attention.query_key_value.weight.device.index == 0
 
-    @require_cuda
+    @require_cuda_or_xpu
     @slow
     @require_bnb
     def test_dipatch_model_fp4_simple(self):
@@ -1010,7 +1011,7 @@ class BigModelingTester(unittest.TestCase):
         model = load_checkpoint_and_dispatch(
             model,
             checkpoint=model_path,
-            device_map={"": torch.device("cuda:0")},
+            device_map={"": torch_device},
         )
 
         assert model.h[0].self_attention.query_key_value.weight.dtype == torch.uint8
@@ -1027,7 +1028,7 @@ class BigModelingTester(unittest.TestCase):
         model = load_checkpoint_and_dispatch(
             model,
             checkpoint=model_path,
-            device_map={"": "cuda:0"},
+            device_map={"": torch_device},
         )
 
         assert model.h[0].self_attention.query_key_value.weight.dtype == torch.uint8
