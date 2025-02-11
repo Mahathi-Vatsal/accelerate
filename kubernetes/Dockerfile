@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Use a Python slim base image
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Set up non-interactive mode for APT
 ENV DEBIAN_FRONTEND=noninteractive
@@ -34,5 +34,5 @@ RUN python -m pip install torch torchvision torchaudio --index-url https://downl
 
 RUN git clone https://github.com/Mahathi-Vatsal/accelerate.git && \
     cd accelerate && \
-    pip install .
+    pip install . &&\
     pip install -r kubernetes/requirements.txt

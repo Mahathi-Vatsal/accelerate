@@ -1,0 +1,71 @@
+{{- if eq .Values.deployment "single" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-single-gpu
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+      - name: accelerate-job-single
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+          {{- range .Values.env }}
+          - name: {{ .name }}
+            value: {{ .value }}
+          {{- end }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+          - name: workspace-volume
+            mountPath: {{ .Values.storage.pvcMountPath }}
+
+        command:
+          - "sh"
+          - "-c"
+          - |
+              # Install dependencies before running Accelerate
+              pip install accelerate && \
+              git clone https://github.com/Mahathi-Vatsal/accelerate.git && \
+              cd accelerate && \
+              pip install . && \
+              pip install -r kubernetes/requirements.txt
+
+              # Write the single_gpu_config.yaml inside the container
+              cat <<EOF > /workspace/single_gpu_config.yaml
+              compute_environment: LOCAL_MACHINE
+              debug: false
+              distributed_type: NO
+              downcast_bf16: no
+              enable_cpu_affinity: false
+              gpu_ids: all
+              machine_rank: 0
+              main_training_function: main
+              mixed_precision: bf16
+              num_machines: 1
+              num_processes: 1
+              rdzv_backend: static
+              same_network: true
+              tpu_env: []
+              tpu_use_cluster: false
+              tpu_use_sudo: false
+              use_cpu: false
+              EOF
+
+              # Run Accelerate
+              accelerate launch --config_file /workspace/single_gpu_config.yaml examples/nlp_example.py
+      volumes:
+      - name: workspace-volume
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-pvc
+{{- end }}
