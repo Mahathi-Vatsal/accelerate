@@ -1,11 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: accelerate-pvc
-  namespace: default
+  name: single-gpu-pvc
 spec:
   accessModes:
-    - {{ .Values.storage.accessModes | quote }}
+    - "ReadWriteMany"
   resources:
     requests:
       storage: {{ .Values.storage.resources.requests.storage }}

@@ -7,9 +7,9 @@ image:
   pullPolicy: Always
   cleanPodPolicy: Running
   # -- Repository and name of the docker image
-  repository: amr-registry.caas.intel.com/aiops/mlops-ci
+  repository: vault.habana.ai/gaudi-docker/1.19.0/ubuntu22.04/habanalabs/pytorch-installer-2.5.1
   # -- Tag of the docker image
-  tag: ipex-accelerate
+  tag: latest
 
 # -- Optional [image pull secret](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/) to pull from a private registry
 imagePullSecrets: []
@@ -38,18 +38,16 @@ env:
 - name: LOGLEVEL
   value: INFO
 
-#secret:
-#  # -- Hugging Face token encoded using base64.
-#  encodedToken:
-#  # -- If a token is provided, specify a mount path that will be used to set HF_TOKEN_PATH
-#  secretMountPath: /tmp/hf_token
+secret:
+  # -- Hugging Face token encoded using base64.
+  encodedToken:
+  # -- If a token is provided, specify a mount path that will be used to set HF_TOKEN_PATH
+  secretMountPath: /tmp/hf_token
 
 storage:
   # -- Name of the storage class to use for the persistent volume claim. To list the available storage classes use: `kubectl get storageclass`.
-  storageClassName: nfs-client
+  storageClassName: csi-wekafs-fs
   # -- [Access modes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes) for the persistent volume.
-  accessModes:
-  - "ReadWriteMany"
   # -- Storage [resources](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#resources)
   resources:
     requests:
@@ -62,7 +60,7 @@ storage:
 resources:
   limits:
     # -- Specify the number of Gaudi card(s)
-    habana.ai/gaudi: &hpus 1
+    habana.ai/gaudi: &hpus 2
     # -- Specify [CPU resource](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-cpu) limits for the job
     cpu: 16
     # -- Specify [memory limits](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#meaning-of-memory) requests for the job
@@ -80,19 +78,11 @@ resources:
     hugepages-2Mi: 4400Mi
 
 # -- Number of Gaudi nodes to be used
-numNodes: 2
+numNodes: 1
 # -- Number of Gaudi cards to be used per one node
 numCards: 2
 # -- Number of slots per worker
 slotsPerWorker: 2
-
-# Define the command to run in the container
-command:
-  - "accelerate"
-  - "launch"
-  - "--config_file"
-  - "/workspace/single_gpu_config.yaml"
-  - "examples/nlp_example.py"
 
 # -- Optionally specify a [node selector](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector) with labels the determine which node your worker pod will land on.
 nodeSelector: {}
@@ -102,3 +92,6 @@ tolerations: []
 
 # -- Optionally provide node [affinities](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity) to constrain which node your worker pod will be scheduled on.
 affinity: {}
+
+# Default deployment
+deployment: "single"
