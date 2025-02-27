@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: single-gpu-pvc
+  name: gpu-pvc
 spec:
   accessModes:
     - "ReadWriteMany"
