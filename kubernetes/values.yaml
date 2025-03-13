@@ -80,7 +80,7 @@ resources:
 # -- Number of Gaudi nodes to be used
 numNodes: 2
 # -- Number of Gaudi cards to be used per one node
-numCards: 1
+numCards: 2
 # -- Number of slots per worker
 slotsPerWorker: 2
 

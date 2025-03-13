@@ -19,54 +19,94 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: ["/bin/bash", "-c"]
               args:
-                - >-
+                - |
                   /usr/bin/ssh-keygen -A;
                   /usr/sbin/sshd;
-                  HOSTSFILE=$OMPI_MCA_orte_default_hostfile;
-                  MASTER_ADDR="$(head -n 1 $HOSTSFILE | sed -n s/[[:space:]]slots.*//p)";  # Fetch MASTER_ADDR from the hostfile
-                  echo $MASTER_ADDR;
-                  NUM_NODES=$(wc -l < $HOSTSFILE);
-                  CARDS_PER_NODE={{ .Values.numCards }};
-                  N_CARDS=$((NUM_NODES*CARDS_PER_NODE));
+                  set -e  # Stop script on first error
 
-                  # Setup Accelerate environment
-                  SETUP_CMD="pip install accelerate && \
-                             git clone https://github.com/Mahathi-Vatsal/accelerate.git; \
-                             pip install -r accelerate/kubernetes/requirements.txt";
+                  echo "Running on Launcher Node"
+                  HOSTSFILE=$OMPI_MCA_orte_default_hostfile
+                  MASTER_ADDR="$(head -n 1 $HOSTSFILE | sed -n s/[[:space:]]slots.*//p)"
+                  export MASTER_PORT=$(shuf -i 1024-65535 -n 1)
+                  echo "MASTER_ADDR: $MASTER_ADDR"
+                  echo "MASTER_PORT: $MASTER_PORT"
 
-                  eval $SETUP_CMD;
+                  NUM_NODES=$(wc -l < $HOSTSFILE)
+                  CARDS_PER_NODE={{ .Values.numCards }}
+                  N_CARDS=$((NUM_NODES * CARDS_PER_NODE))
+                  NNODES_GPU={{ .Values.numNodes }}
 
-                  mpirun --npernode 1 \
-                      --tag-output \
-                      --allow-run-as-root \
-                      --prefix $MPI_ROOT \
-                      -mca routed direct \
-                      pip install accelerate && \
-                      git clone https://github.com/Mahathi-Vatsal/accelerate.git;
+                  # Ensure /workspace exists
+                  mkdir -p /workspace
 
-                  mpirun --npernode 1 \
-                      --tag-output \
-                      --allow-run-as-root \
-                      --prefix $MPI_ROOT \
-                      -mca routed direct \
-                      pip install -r accelerate/kubernetes/requirements.txt";
+                  # Setup Accelerate environment on Launcher
+                  if [ ! -d "/accelerate" ]; then
+                      echo "Cloning Accelerate repository..."
+                      git clone https://github.com/Mahathi-Vatsal/accelerate.git /accelerate
+                  else
+                      echo "Accelerate repository already exists, skipping cloning."
+                  fi
 
-                  MODEL_PATH=/accelerate;
-                  cd $MODEL_PATH;
-                  export CCL_WORKER_COUNT=1; \
-                  export CCL_ATL_TRANSPORT=ofi; \
-                  mpirun -f $HOSTSFILE -n $N_CARDS -ppn {{ .Values.slotsPerWorker }} \
+                  if [ -f "/accelerate/kubernetes/requirements.txt" ]; then
+                      echo "Installing required dependencies..."
+                      python3 -m pip install --no-cache-dir accelerate[mp] pytest
+                      python3 -m pip install -r /accelerate/kubernetes/requirements.txt
+                  else
+                      echo "ERROR: /accelerate/kubernetes/requirements.txt not found!" >&2
+                      exit 1
+                  fi
+
+                  MODEL_PATH=/accelerate
+                  cd $MODEL_PATH || { echo "Failed to change directory to $MODEL_PATH"; exit 1; }
+
+                  export CCL_WORKER_COUNT=1
+                  export CCL_ATL_TRANSPORT=ofi
+                  echo "Running MPI job with $N_CARDS total cards"
+
+                  # Write the multi_gpu_config.yaml inside the container
+                  cat <<EOF > /workspace/multi_gpu_config.yaml
+                  compute_environment: LOCAL_MACHINE
+                  distributed_type: MULTI_GPU
+                  downcast_bf16: 'no'
+                  ipex_config:
+                    ipex: true
+                  enable_cpu_affinity: false
+                  gpu_ids: all
+                  machine_rank: 0
+                  main_process_ip: $MASTER_ADDR
+                  main_process_port: $MASTER_PORT
+                  main_training_function: main
+                  mixed_precision: bf16
+                  mpirun_config:
+                    mpirun_ccl: '1'
+                    mpirun_hostfile: $HOSTSFILE
+                  num_machines: $NNODES_GPU
+                  num_processes: $N_CARDS
+                  rdzv_backend: static
+                  same_network: true
+                  tpu_env: []
+                  tpu_use_cluster: false
+                  tpu_use_sudo: false
+                  use_cpu: false
+                  EOF
+
+                  if [ ! -f "/workspace/multi_gpu_config.yaml" ]; then
+                      echo "ERROR: multi_gpu_config.yaml was not created!" >&2
+                      exit 1
+                  fi
+
+                  mpirun --hostfile $HOSTSFILE -n $N_CARDS \
+                      --map-by ppr:{{ .Values.slotsPerWorker }}:node \
                       --allow-run-as-root \
                       --bind-to core \
-                      --map-by ppr:$CARDS_PER_NODE:node:PE=6 \
-                      -rank-by core --report-bindings \
+                      --rank-by core --report-bindings \
                       --tag-output \
                       --merge-stderr-to-stdout --prefix $MPI_ROOT \
                       -x MASTER_ADDR=$MASTER_ADDR \
                       -mca btl_tcp_if_include eth0 \
                       -mca oob_tcp_if_include eth0 \
                       -mca plm_rsh_no_tree_spawn 1 \
-                      accelerate launch examples/nlp_example.py";
+                      accelerate launch --config_file /workspace/multi_gpu_config.yaml examples/nlp_example.py
 
               resources:
                 limits:
@@ -89,10 +129,40 @@ spec:
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command: ["/bin/bash", "-c"]
               args:
-                - >-
+                - |
+                  echo "Worker node starting..."
                   /usr/bin/ssh-keygen -A;
                   /usr/sbin/sshd;
-                  sleep 365d;  # Keep the container alive for the training job
+                  set -e  # Stop script on first error
+
+                  echo "Running on Worker Node"
+
+                  # Setup Accelerate environment on Worker nodes
+                  if [ ! -d "/accelerate" ]; then
+                      echo "Cloning Accelerate repository..."
+                      git clone https://github.com/Mahathi-Vatsal/accelerate.git /accelerate
+                  else
+                      echo "Accelerate repository already exists, skipping cloning."
+                  fi
+
+                  if [ -f "/accelerate/kubernetes/requirements.txt" ]; then
+                      echo "Installing required dependencies..."
+                      python3 -m pip install --no-cache-dir accelerate[mp] pytest
+                      python3 -m pip install -r /accelerate/kubernetes/requirements.txt
+                  else
+                      echo "ERROR: /accelerate/kubernetes/requirements.txt not found!" >&2
+                      exit 1
+                  fi
+
+                  echo "Worker node setup complete"
+                  sleep 365d  # Keep the container alive for the training job
+              volumeMounts:
+                - name: workspace-volume
+                  mountPath: /workspace
               resources:
                 {{- toYaml .Values.resources | nindent 16 }}
+          volumes:
+            - name: workspace-volume
+              persistentVolumeClaim:
+                claimName: {{ .Release.Name }}-pvc
 {{- end }}
